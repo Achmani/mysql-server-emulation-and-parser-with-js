@@ -1,0 +1,21 @@
+package id.mit.chrono.server.test;
+
+public class StringTest {
+
+    public static void main(String[] args){
+
+//        String test = "Regional_6_CFGMML_MBSC_Anteve1_20180512.zip";
+//
+//        System.out.println(test.matches("Regional_\\d+_CFGMML_.*_\\d{8}.zip"));
+//
+//        System.out.println(Integer.parseInt("0001111111100000000010100000010000001111", 10));
+
+
+<<<<<<< mine
+        System.out.println(Integer.parseInt("00011110001111", 10));
+=======
+        System.out.println("SBTS-267116.xml.gz".matches("^SBTS[-]\\d+[.]xml[.]gz$"));
+>>>>>>> theirs
+
+    }
+}

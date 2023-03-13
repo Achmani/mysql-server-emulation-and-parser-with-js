@@ -1,0 +1,243 @@
+package id.mit.chrono.server.base;
+
+import com.google.common.base.Stopwatch;
+import id.mit.chrono.server.crypt.MCrypt;
+<<<<<<< mine
+import id.mit.chrono.server.main.Collector;
+import id.mit.chrono.server.model.tables.records.CollectortaskRecord;
+import id.mit.chrono.server.model.tables.records.DatagroupRecord;
+=======
+>>>>>>> theirs
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Options;
+import org.apache.commons.validator.routines.DateValidator;
+import org.apache.log4j.PropertyConfigurator;
+import org.jooq.DSLContext;
+import org.jooq.Result;
+import org.jooq.SQLDialect;
+import org.jooq.conf.Settings;
+import org.jooq.conf.StatementType;
+import org.jooq.impl.DSL;
+import org.jooq.tools.LoggerListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.xml.bind.JAXB;
+import java.io.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.time.Instant;
+import java.util.Date;
+import java.util.Properties;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.LogManager;
+
+import static id.mit.chrono.server.model.Tables.COLLECTORTASK;
+import static id.mit.chrono.server.model.Tables.DATAGROUP;
+
+public class MainBase {
+
+    protected DSLContext create;
+    protected Options options = new Options();
+    protected Logger logger;
+    protected Connection conn;
+    protected Properties prop = new Properties();
+    protected Stopwatch stopwatch;
+
+    protected String GROUP = null;
+    protected String TIMEGROUP = null;
+
+    protected DateValidator dValidator = new DateValidator();
+    protected Date groupDate;
+
+    protected int COLLECTORTASK_ID = 0;
+    protected int DATAGROUP_ID;
+    protected int TIMEOUT;
+
+    protected String[] dataSources;
+
+    protected String TASK_NAME = null;
+
+    public MainBase(){
+
+        // initialize stopwatch
+        stopwatch = Stopwatch.createUnstarted();
+
+        this.setupLogger();
+
+        this.readProp();
+
+        this.connectDB();
+    }
+
+    protected void setupLogger(){
+
+        PropertyConfigurator.configure("log4j.properties");
+        logger = LoggerFactory.getLogger(this.getClass());
+    }
+
+    protected void readProp(){
+
+        InputStream input = null;
+
+        try {
+
+            input = new FileInputStream(System.getProperty("user.dir") + File.separator + "chrono.properties");
+
+            // load a properties file
+            prop.load(input);
+
+            // decrypt data from crono.properties
+            MCrypt mc = new MCrypt();
+
+            String val;
+            for(String s: prop.stringPropertyNames()){
+
+                val = new String(mc.decrypt(prop.getProperty(s)));
+                prop.setProperty(s, val);
+
+            }
+
+        } catch (Exception e) {
+            logger.error("error reading chrono.properties: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(-2);
+        } finally {
+            if (input != null) {
+                try {
+                    input.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    protected void connectDB(){
+
+        String username = "";
+        String password = "";
+        String url = "";
+
+        if((url = prop.getProperty("id.mit.chrono.server.db.url")) != null){
+            logger.debug("found id.mit.chrono.server.db.url");
+        }
+
+        if((username = prop.getProperty("id.mit.chrono.server.db.username")) != null){
+            logger.debug("found id.mit.chrono.server.db.username");
+        }
+
+        if((password = prop.getProperty("id.mit.chrono.server.db.password")) != null){
+            logger.debug("found id.mit.chrono.server.db.password");
+        }
+
+        long start = System.currentTimeMillis();
+
+        try {
+            stopwatch.start();
+            conn = DriverManager.getConnection(url, username, password);
+            stopwatch.stop();
+            logger.debug("connected to: '" + url + "' in " + stopwatch.elapsed(TimeUnit.MILLISECONDS) + " ms");
+
+//            Settings settings = JAXB.unmarshal(new File("jooq-settings.xml"), Settings.class);
+
+            Settings settings = new Settings();
+            settings.setStatementType(StatementType.STATIC_STATEMENT);
+            settings.setExecuteLogging(false);
+            create = DSL.using(conn, SQLDialect.MYSQL, settings);
+        }
+        catch (Exception e) {
+            logger.error("failed to connect to: " + url);
+            e.printStackTrace();
+            System.exit(-3);
+        }
+    }
+
+    protected void disconnectDB(){
+
+        if(this.conn != null){
+
+            boolean isClosed = true;
+
+            try {
+
+                if(!this.conn.isClosed()){
+                    this.conn.close();
+                    logger.debug("disconnected from DB");
+                }
+
+            } catch (SQLException e) {
+                logger.debug("failed to disconnect from DB");
+                e.printStackTrace();
+            }
+        }
+    }
+
+    protected void showHelp(){
+
+        HelpFormatter formater = new HelpFormatter();
+        formater.printHelp("Main", options);
+
+    }
+
+    protected void getTask(){
+
+        Result<DatagroupRecord> result = create.selectFrom(DATAGROUP)
+                .where(DATAGROUP.DATAGROUP_CODE.equal(GROUP))
+                .limit(1)
+                .fetch();
+
+        if(result.isNotEmpty()){
+
+            DATAGROUP_ID = result.get(0).getDatagroupId();
+            logger.debug("DATAGROUP_ID: " + GROUP + " ->" + DATAGROUP_ID);
+        }
+
+        TASK_NAME = GROUP + "_" + TIMEGROUP;
+
+        CollectortaskRecord result2 = create.selectFrom(COLLECTORTASK)
+                .where(COLLECTORTASK.COLLECTORTASK_DATAGROUP.equal(DATAGROUP_ID))
+                .and(COLLECTORTASK.COLLECTORTASK_NAME.equal(TASK_NAME))
+                .fetchAny();
+
+        if(result2 == null){
+
+            // create
+            CollectortaskRecord r = create.newRecord(COLLECTORTASK);
+
+            r.setCollectortaskDatagroup(DATAGROUP_ID);
+            r.setCollectortaskName(TASK_NAME);
+            r.setCollectortaskEpoch((int)(groupDate.getTime()/1000));
+            r.setCollectortaskCreated((int)Instant.now().getEpochSecond());
+
+            r.store();
+
+            COLLECTORTASK_ID = r.getCollectortaskId();
+        }
+        else{
+
+            COLLECTORTASK_ID = result2.getCollectortaskId();
+        }
+
+        if(COLLECTORTASK_ID == 0){
+
+            logger.error("unable to get COLLECTORTASK_ID");
+            System.exit(-4);
+        }
+
+        // prepare directory for raw data
+        String dirPath = "data" + File.separator + "raw" + File.separator + GROUP;
+        File groupDir = new File(dirPath);
+        if(!groupDir.exists()){
+            groupDir.mkdir();
+        }
+
+        File timeGroupDir = new File(dirPath + File.separator + TIMEGROUP);
+        if(!timeGroupDir.exists()){
+            timeGroupDir.mkdir();
+        }
+
+        logger.debug("COLLECTORTASK_ID: " + COLLECTORTASK_ID);
+    }
+}

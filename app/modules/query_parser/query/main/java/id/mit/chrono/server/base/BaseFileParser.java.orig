@@ -1,0 +1,343 @@
+<<<<<<< mine
+package id.mit.chrono.server.base;
+
+import id.mit.chrono.server.iface.FileParser;
+import id.mit.chrono.server.iface.FileParserCallback;
+import id.mit.chrono.server.model.tables.records.MapparserRecord;
+import id.mit.chrono.server.obj.HuaweiCfmMmlObj;
+import id.mit.chrono.server.obj.SourceFile;
+import id.mit.chrono.server.utils.ArchiveUtils;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.FilenameUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.File;
+import java.time.Instant;
+import java.util.ArrayList;
+
+public abstract class BaseFileParser implements FileParser {
+
+    private FileParserCallback fpc;
+    private Thread myThread;
+
+    protected ArrayList<File> files = new ArrayList<File>();
+    protected boolean isInTemporary = false;
+    protected Logger logger = LoggerFactory.getLogger(this.getClass());
+    protected SourceFile sourceFile;
+
+    protected void finalizeBase(){
+
+        // if started with extraction, then delete from temporary folder
+        if(isInTemporary){
+
+            for (int i = 0; i < files.size(); i++) {
+
+                files.get(i).delete();
+            }
+        }
+
+        // trigger event on finished to upper layer
+        if(this.fpc != null && this.sourceFile != null){
+
+            this.fpc.onFileParserFinished(this);
+        }
+    }
+
+    public static void main(String[] args){
+
+//        BaseFileParser bf = new BaseFileParser(){
+//
+//            protected void doLocalParse(){
+//
+//            }
+//        };
+
+//        bf.setInitData(new SourceFile(0, "data/raw/CM_RAN/201805020900/CM_RAN_HW_10.52.204.81/CMExport_MBSC_Wuryantoro_10.6.140.193_2018050204.csv.gz", 0, null));
+//        bf.parse();
+    }
+
+    @Override
+    public void setInitData(SourceFile sourceFile, FileParserCallback fpc){
+
+        this.sourceFile = sourceFile;
+        this.fpc = fpc;
+    }
+
+    @Override
+    public SourceFile getSourceFile(){
+
+        return this.sourceFile;
+    }
+
+    protected void updateFileProcessTime(int processStatus, String reason){
+
+        this.sourceFile.setProcessTime((int) Instant.now().getEpochSecond());
+        this.sourceFile.setProcessStatus(processStatus);
+        this.sourceFile.setProcessStatusReason(reason);
+    }
+
+    protected void prepare(){
+
+        File file = new File(this.sourceFile.getFilePath());
+
+        try{
+
+            String folderPath = this.sourceFile.getFilePath().substring(0, this.sourceFile.getFilePath().lastIndexOf('/'));
+            String fileName = file.getName();
+
+            ArrayList<String> temporary = new ArrayList<String>();
+
+            // check extension first, just use endswith
+            if(fileName.endsWith(".zip")){
+
+                temporary = ArchiveUtils.extractZip(new File(this.sourceFile.getFilePath()), new File("data/tmp"));
+
+                for (int i = 0; i < temporary.size(); i++) {
+
+                    this.files.add(new File(temporary.get(i)));
+                }
+
+                fileName = fileName.substring(0, fileName.length()-4);
+                isInTemporary = true;
+            }
+            else if(fileName.endsWith(".tar.gz")){
+
+                temporary = ArchiveUtils.decompressGZIP(new File(this.sourceFile.getFilePath()), new File("data/tmp"));
+
+                for (int i = 0; i < temporary.size(); i++) {
+
+                    this.files.add(new File(temporary.get(i)));
+                }
+
+                fileName = fileName.substring(0, fileName.length()-7);
+                isInTemporary = true;
+            }
+            else if(fileName.endsWith(".gz")){
+
+                temporary = ArchiveUtils.decompressGZIP(new File(this.sourceFile.getFilePath()), new File("data/tmp"));
+
+                for (int i = 0; i < temporary.size(); i++) {
+
+                    this.files.add(new File(temporary.get(i)));
+                }
+
+                fileName = fileName.substring(0, fileName.length()-3);
+                isInTemporary = true;
+            }
+            else if(fileName.endsWith(".csv")){
+
+                this.files.add(new File(this.sourceFile.getFilePath()));
+            }
+            else if(fileName.endsWith(".txt")){
+
+                this.files.add(new File(this.sourceFile.getFilePath()));
+            }
+            else if(fileName.endsWith(".xml")){
+
+                this.files.add(new File(this.sourceFile.getFilePath()));
+            }
+            else{
+
+                // add validation later
+                this.files.add(new File(this.sourceFile.getFilePath()));
+            }
+        }
+        catch(Exception e){
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void parse() {
+
+        this.myThread = new Thread(this);
+        this.myThread.start();
+    }
+
+    @Override
+    public void run() {
+
+        doLocalParse();
+        finalizeBase();
+
+        this.myThread = null;
+    }
+
+    protected abstract void doLocalParse();
+}
+=======
+package id.mit.chrono.server.base;
+
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.zip.*;
+
+public abstract class BaseFileParser {
+
+    protected String filePath;
+
+    public BaseFileParser (String filePath){
+
+        this.filePath = filePath;
+
+        String tempDir;
+
+        if(filePath.endsWith(".zip")){
+
+            tempDir = getTempDirPath();
+
+            ArrayList<String> paths =  unzip(filePath, tempDir);
+
+            File tempFile;
+
+            for (int i = 0; i < paths.size(); i++) {
+
+                tempFile = new File(paths.get(i));
+
+                if(!tempFile.exists()){
+                    continue;
+                }
+
+                if(tempFile.isFile()){
+
+                    parseFile(tempFile.getAbsolutePath());
+                }
+            }
+
+            // remove temp dir
+            File tempDirFile = new File(tempDir);
+            tempDirFile.delete();
+
+        } else if(filePath.endsWith(".gz")){
+
+                tempDir = getTempDirPath();
+
+            doUnGzipFile(filePath, tempDir.toString());
+
+
+        } else {
+
+            parseFile(filePath);
+        }
+
+    }
+
+    public String getTempDirPath(){
+
+        String absolutePath = "";
+        String tempFilePath = "";
+
+        try{
+
+            //create a temp file
+            File temp = File.createTempFile("temp-file-name", ".tmp");
+
+            //Get tempropary file path
+            absolutePath = temp.getAbsolutePath();
+            tempFilePath = absolutePath.substring(0,absolutePath.lastIndexOf(File.separator));
+
+        }catch(IOException e){
+
+            e.printStackTrace();
+
+        }
+
+        return tempFilePath;
+    }
+
+    private ArrayList<String> unzip(String zipFilePath, String unzipLocation) {
+
+        ArrayList<String> extractedResult = new ArrayList<String>();
+
+        if (!(Files.exists(Paths.get(unzipLocation)))) {
+
+            try {
+                Files.createDirectories(Paths.get(unzipLocation));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        try (ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream(zipFilePath))) {
+
+            ZipEntry entry = zipInputStream.getNextEntry();
+
+            while (entry != null) {
+
+                Path filePath = Paths.get(unzipLocation, entry.getName());
+
+                if (!entry.isDirectory()) {
+                    unzipFiles(zipInputStream, filePath);
+
+                    extractedResult.add(filePath.toAbsolutePath().toString());
+
+                    System.out.println("This is File : " + filePath.toAbsolutePath().toString());
+
+                } else {
+
+                    Files.createDirectories(filePath);
+
+                    extractedResult.add(filePath.toAbsolutePath().toString());
+
+                    System.out.println("This is Directory : " + filePath.toAbsolutePath().toString());
+                }
+
+                zipInputStream.closeEntry();
+                entry = zipInputStream.getNextEntry();
+            }
+        } catch (IOException e) {
+
+            e.printStackTrace();
+        }
+
+        return extractedResult;
+    }
+
+    public static void unzipFiles(ZipInputStream zipInputStream, Path unzipFilePath) throws IOException {
+
+        try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(unzipFilePath.toAbsolutePath().toString()))) {
+            byte[] bytesIn = new byte[1024];
+            int read = 0;
+            while ((read = zipInputStream.read(bytesIn)) != -1) {
+                bos.write(bytesIn, 0, read);
+            }
+        }
+
+    }
+
+    public void doUnGzipFile(String filePath, String fileOutput) {
+
+        GZIPInputStream gis = null;
+        FileInputStream fis = null;
+        FileOutputStream fos = null;
+
+        try {
+
+            fis = new FileInputStream(filePath);
+            gis = new GZIPInputStream(fis);
+            fos = new FileOutputStream(fileOutput);
+
+            byte[] tmp = new byte[4*1024];
+            int size = 0;
+            while ((size = gis.read(tmp)) > 0) {
+                fos.write(tmp, 0, size);
+            }
+
+            fos.flush();
+
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        } finally {
+            try{
+                if(gis != null) gis.close();
+                if(fos != null) fos.close();
+            } catch(Exception ex){ ex.printStackTrace();}
+        }
+    }
+
+    protected abstract void parseFile(String filePath);
+}
+>>>>>>> theirs
